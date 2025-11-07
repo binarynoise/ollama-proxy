@@ -39,6 +39,14 @@ func (r *responseForwarder) Errored() bool {
 	return r.errored
 }
 
+// WriteHeader captures the status code and marks errors for 4xx/5xx responses
+func (r *responseForwarder) WriteHeader(statusCode int) {
+    if statusCode >= 400 {
+        r.MarkError()
+    }
+    r.ResponseWriter.WriteHeader(statusCode)
+}
+
 // Write forwards the response data and updates the tracker
 func (r *responseForwarder) Write(b []byte) (int, error) {
 	// Forward the data to the original writer first

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"strings"
 
 	"ollama-proxy/internal/tracker"
 )
@@ -38,7 +39,7 @@ func NewInterceptor(tracker *tracker.CallTracker) *Interceptor {
 
 // ShouldIntercept determines if a request should be intercepted
 func (i *Interceptor) ShouldIntercept(r *http.Request) bool {
-	return r.URL.Path == "/api/chat" || r.URL.Path == "/api/generate"
+	return strings.HasSuffix(r.URL.Path, "/api/chat") || strings.HasSuffix(r.URL.Path, "/api/generate")
 }
 
 // InterceptRequest processes the request and returns a response writer that tracks the response

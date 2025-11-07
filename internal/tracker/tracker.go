@@ -139,7 +139,3 @@ func (t *CallTracker) GetCall(id string) (*types.Call, bool) {
 func (t *CallTracker) Events() <-chan types.Event {
 	return t.eventChan
 }
-
-func (t *CallTracker) Close() {
-	close(t.eventChan)
-}

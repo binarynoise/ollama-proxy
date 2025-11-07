@@ -37,7 +37,6 @@ func main() {
 
 	// Initialize components
 	tracker := tracker.NewCallTracker(*maxCalls)
-	defer tracker.Close()
 
 	// Create and start the proxy
 	proxy, err := proxy.NewProxy(*targetURL, tracker)
