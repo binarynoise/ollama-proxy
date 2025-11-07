@@ -231,7 +231,6 @@ func (t *TUI) updateCallList() {
 			0,
 			nil,
 		)
-		log.Printf("Rendered call %d: ID='%s', ShortID='%s', Text='%s' (%d chars)", i, call.ID, shortID, itemText, len(itemText))
 
 		// If this was the previously selected item, select it again
 		if currentID != "" && strings.HasPrefix(call.ID, currentID) {

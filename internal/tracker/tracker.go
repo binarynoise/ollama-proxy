@@ -1,7 +1,6 @@
 package tracker
 
 import (
-	"log"
 	"sync"
 	"time"
 
@@ -62,8 +61,6 @@ func (t *CallTracker) NewCall(method, endpoint, request string) *types.Call {
 		Data: "",
 		Done: false,
 	}
-
-	log.Printf("Created new call with ID: %s", call.ID)
 
 	return call
 }
