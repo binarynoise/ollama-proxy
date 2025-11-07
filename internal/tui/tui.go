@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -255,6 +256,77 @@ func assert(b bool) {
 	}
 }
 
+// formatChatMessages formats chat messages in a human-readable way
+func formatChatMessages(request, response string) string {
+	var sb strings.Builder
+
+	// Try to parse request as JSON to extract messages
+	sb.WriteString("[yellow]Request:[white]\n")
+	if strings.TrimSpace(request) != "" {
+		var reqData map[string]interface{}
+		if err := json.Unmarshal([]byte(request), &reqData); err == nil {
+			if messages, ok := reqData["messages"].([]interface{}); ok {
+				for _, msg := range messages {
+					if msgMap, ok := msg.(map[string]interface{}); ok {
+						role, _ := msgMap["role"].(string)
+						content, _ := msgMap["content"].(string)
+						if role != "" && content != "" {
+							sb.WriteString(fmt.Sprintf("\n# %s\n%s\n", strings.Title(role), content))
+						}
+					}
+				}
+			} else {
+				sb.WriteString(request)
+			}
+		} else {
+			sb.WriteString(request)
+		}
+	}
+
+	// Add response
+	sb.WriteString("\n\n[yellow]Response:[white]\n")
+	if strings.TrimSpace(response) != "" {
+		// Handle both single response and streamed responses (one JSON object per line)
+		lines := strings.Split(strings.TrimSpace(response), "\n")
+		var lastResponse string
+
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+
+			var respData map[string]interface{}
+			if err := json.Unmarshal([]byte(line), &respData); err != nil {
+				continue
+			}
+
+			// Handle Ollama API response format
+			if message, ok := respData["message"].(map[string]interface{}); ok {
+				if role, roleOk := message["role"].(string); roleOk && role == "assistant" {
+					if content, contentOk := message["content"].(string); contentOk && content != "" {
+						if lastResponse == "" {
+							lastResponse = content
+						} else {
+							lastResponse += content
+						}
+					}
+				}
+			} else if content, ok := respData["response"].(string); ok && content != "" {
+				// Fallback for other response formats
+				lastResponse = content
+			}
+		}
+
+		if lastResponse != "" {
+			sb.WriteString(fmt.Sprintf("# Assistant\n%s\n", lastResponse))
+		} else {
+			sb.WriteString(response)
+		}
+	}
+
+	return sb.String()
+}
+
 func (t *TUI) updateDetailView() {
 	if t.selectedID == "" {
 		t.detailView.Clear()
@@ -267,13 +339,20 @@ func (t *TUI) updateDetailView() {
 		return
 	}
 
-	var sb strings.Builder
-	sb.WriteString("[yellow]Request:[white]\n")
-	sb.WriteString(call.Request)
-	sb.WriteString("\n\n[yellow]Response:[white]\n")
-	sb.WriteString(call.Response)
+	var displayText string
+	if strings.HasSuffix(call.Endpoint, "/api/chat") {
+		displayText = formatChatMessages(call.Request, call.Response)
+	} else {
+		// Fallback to raw display for non-chat endpoints
+		var sb strings.Builder
+		sb.WriteString("[yellow]Request:[white]\n")
+		sb.WriteString(call.Request)
+		sb.WriteString("\n\n[yellow]Response:[white]\n")
+		sb.WriteString(call.Response)
+		displayText = sb.String()
+	}
 
-	t.detailView.SetText(sb.String())
+	t.detailView.SetText(displayText)
 	t.detailView.ScrollToEnd()
 }
 
