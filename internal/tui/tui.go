@@ -235,11 +235,17 @@ func (t *TUI) updateCallList() {
 func formatGenerateMessages(request, response string) string {
 	var sb strings.Builder
 
-	// Parse and display the request prompt
-	sb.WriteString("[yellow]Prompt:[white]\n")
+	// Parse the request JSON once
 	if strings.TrimSpace(request) != "" {
-		var reqData map[string]interface{}
+		var reqData map[string]any
 		if err := json.Unmarshal([]byte(request), &reqData); err == nil {
+			// Display model if available
+			if model, ok := reqData["model"].(string); ok && model != "" {
+				sb.WriteString(fmt.Sprintf("[blue]Model:[white] %s\n\n", model))
+			}
+
+			// Display prompt
+			sb.WriteString("[yellow]Prompt:[white]\n")
 			if prompt, ok := reqData["prompt"].(string); ok && prompt != "" {
 				sb.WriteString(prompt)
 				sb.WriteString("\n")
@@ -247,8 +253,12 @@ func formatGenerateMessages(request, response string) string {
 				sb.WriteString(request)
 			}
 		} else {
+			sb.WriteString("[yellow]Prompt:[white]\n")
 			sb.WriteString(request)
 		}
+	} else {
+		sb.WriteString("[yellow]Prompt:[white]\n")
+		sb.WriteString(request)
 	}
 
 	// Parse and display the response
@@ -263,7 +273,7 @@ func formatGenerateMessages(request, response string) string {
 				continue
 			}
 
-			var respData map[string]interface{}
+			var respData map[string]any
 			if err := json.Unmarshal([]byte(line), &respData); err != nil {
 				continue
 			}
@@ -289,11 +299,17 @@ func formatGenerateMessages(request, response string) string {
 func formatChatMessages(request, response string) string {
 	var sb strings.Builder
 
-	// Try to parse request as JSON to extract messages
-	sb.WriteString("[yellow]Request:[white]\n")
+	// Parse the request JSON once
 	if strings.TrimSpace(request) != "" {
-		var reqData map[string]interface{}
+		var reqData map[string]any
 		if err := json.Unmarshal([]byte(request), &reqData); err == nil {
+			// Display model if available
+			if model, ok := reqData["model"].(string); ok && model != "" {
+				sb.WriteString(fmt.Sprintf("[blue]Model:[white] %s\n\n", model))
+			}
+
+			// Display messages
+			sb.WriteString("[yellow]Request:[white]\n")
 			if messages, ok := reqData["messages"].([]interface{}); ok {
 				for _, msg := range messages {
 					if msgMap, ok := msg.(map[string]interface{}); ok {
@@ -324,13 +340,13 @@ func formatChatMessages(request, response string) string {
 				continue
 			}
 
-			var respData map[string]interface{}
+			var respData map[string]any
 			if err := json.Unmarshal([]byte(line), &respData); err != nil {
 				continue
 			}
 
 			// Handle Ollama API response format
-			if message, ok := respData["message"].(map[string]interface{}); ok {
+			if message, ok := respData["message"].(map[string]any); ok {
 				if role, roleOk := message["role"].(string); roleOk && role == "assistant" {
 					if content, contentOk := message["content"].(string); contentOk && content != "" {
 						if lastResponse == "" {
