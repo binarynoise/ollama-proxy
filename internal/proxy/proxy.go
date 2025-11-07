@@ -60,7 +60,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		p.interceptor.CompleteCall(callID)
+		p.interceptor.CompleteCall(fw, callID)
 		return
 	}
 

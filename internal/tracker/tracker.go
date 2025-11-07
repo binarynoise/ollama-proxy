@@ -111,6 +111,22 @@ func (t *CallTracker) ErrorCall(id string) {
 	}
 }
 
+// DisconnectCall marks a call as disconnected by the client
+func (t *CallTracker) DisconnectCall(id string) {
+	t.mu.RLock()
+	call, exists := t.calls[id]
+	t.mu.RUnlock()
+
+	if exists {
+		call.MarkDisconnected()
+		t.eventChan <- types.Event{
+			ID:   id,
+			Data: "Client disconnected",
+			Done: true,
+		}
+	}
+}
+
 func (t *CallTracker) GetCalls() []*types.Call {
 	t.mu.RLock()
 	defer t.mu.RUnlock()

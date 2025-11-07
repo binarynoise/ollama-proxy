@@ -8,9 +8,10 @@ import (
 type CallStatus string
 
 const (
-	StatusActive CallStatus = "active"
-	StatusDone   CallStatus = "done"
-	StatusError  CallStatus = "error"
+	StatusActive       CallStatus = "active"
+	StatusDone         CallStatus = "done"
+	StatusError        CallStatus = "error"
+	StatusDisconnected CallStatus = "disconnected"
 )
 
 type Call struct {
@@ -45,6 +46,15 @@ func (c *Call) MarkError() {
 	now := time.Now()
 	c.EndTime = &now
 	c.Status = StatusError
+}
+
+// MarkDisconnected marks the call as disconnected by the client
+func (c *Call) MarkDisconnected() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	c.EndTime = &now
+	c.Status = StatusDisconnected
 }
 
 type Event struct {

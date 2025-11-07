@@ -197,6 +197,8 @@ func (t *TUI) updateCallList() {
 			status = "✅"
 		case types.StatusError:
 			status = "❌"
+		case types.StatusDisconnected:
+			status = "🟠"
 		}
 
 		duration := time.Since(call.StartTime).Round(time.Millisecond)

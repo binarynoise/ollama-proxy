@@ -65,10 +65,16 @@ func (i *Interceptor) InterceptRequest(w http.ResponseWriter, r *http.Request) (
 		tracker:        i.tracker,
 	}
 
+	// Set up context cancellation for client disconnection
+	fw.setupContext(r.Context())
+
 	return fw, req, call.ID
 }
 
-// CompleteCall marks a call as completed
-func (i *Interceptor) CompleteCall(callID string) {
+// CompleteCall marks a call as completed and cleans up resources
+func (i *Interceptor) CompleteCall(w http.ResponseWriter, callID string) {
+	if fw, ok := w.(*responseForwarder); ok {
+		defer fw.Close()
+	}
 	i.tracker.CompleteCall(callID)
 }

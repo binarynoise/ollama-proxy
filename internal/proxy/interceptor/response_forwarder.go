@@ -1,6 +1,7 @@
 package interceptor
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"sync"
@@ -17,6 +18,9 @@ type responseForwarder struct {
 	mu      sync.Mutex
 	errored bool
 	buffer  []byte
+	ctx     context.Context
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 func (r *responseForwarder) CallID() string {
@@ -43,10 +47,85 @@ func (r *responseForwarder) Errored() bool {
 
 // WriteHeader captures the status code and marks errors for 4xx/5xx responses
 func (r *responseForwarder) WriteHeader(statusCode int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	
 	if statusCode >= 400 {
-		r.MarkError()
+		r.errored = true
+		if r.tracker != nil && r.callID != "" {
+			r.tracker.ErrorCall(r.callID)
+		}
 	}
 	r.ResponseWriter.WriteHeader(statusCode)
+}
+
+// setupContext sets up context cancellation when the client disconnects
+func (r *responseForwarder) setupContext(ctx context.Context) {
+	r.mu.Lock()
+
+	// If already set up, do nothing
+	if r.done != nil {
+		r.mu.Unlock()
+		return
+	}
+
+	r.done = make(chan struct{})
+
+	// Create a cancellable context for the request
+	reqCtx, cancelReqCtx := context.WithCancel(ctx)
+	r.ctx, r.cancel = context.WithCancel(context.Background())
+	r.mu.Unlock()
+
+	// Start a goroutine to handle context cancellation
+	go func() {
+		// Wait for either the request context to be done or the request to complete
+		select {
+		case <-reqCtx.Done():
+			r.mu.Lock()
+			defer r.mu.Unlock()
+
+			// If we've already completed or errored, don't mark as disconnected
+			if r.errored || r.tracker == nil || r.callID == "" {
+				return
+			}
+
+			// Check if the request context was canceled due to client disconnect
+			if reqCtx.Err() == context.Canceled && ctx.Err() == context.Canceled {
+				// This is a client disconnection
+				select {
+				case <-r.done:
+					// Request completed normally just as we were checking
+				default:
+					r.tracker.DisconnectCall(r.callID)
+					r.errored = true
+				}
+			}
+
+		case <-r.done:
+			// Request completed normally, clean up the request context
+			cancelReqCtx()
+		}
+	}()
+}
+
+// Close cleans up resources
+func (r *responseForwarder) Close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.done != nil {
+		// Signal that the request is done
+		select {
+		case <-r.done:
+			// Already closed
+		default:
+			close(r.done)
+		}
+	}
+	
+	if r.cancel != nil {
+		r.cancel()
+	}
 }
 
 // Flush flushes any buffered data to the client
