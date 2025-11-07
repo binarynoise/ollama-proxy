@@ -274,6 +274,61 @@ func assert(b bool) {
 	}
 }
 
+// formatGenerateMessages formats /api/generate responses in a human-readable way
+func formatGenerateMessages(request, response string) string {
+	var sb strings.Builder
+
+	// Parse and display the request prompt
+	sb.WriteString("[yellow]Prompt:[white]\n")
+	if strings.TrimSpace(request) != "" {
+		var reqData map[string]interface{}
+		if err := json.Unmarshal([]byte(request), &reqData); err == nil {
+			if prompt, ok := reqData["prompt"].(string); ok && prompt != "" {
+				sb.WriteString(prompt)
+				sb.WriteString("\n")
+			} else {
+				sb.WriteString(request)
+			}
+		} else {
+			sb.WriteString(request)
+		}
+	}
+
+	// Parse and display the response
+	sb.WriteString("\n\n[yellow]Response:[white]\n")
+	if strings.TrimSpace(response) != "" {
+		// Handle both single response and streamed responses (one JSON object per line)
+		lines := strings.Split(strings.TrimSpace(response), "\n")
+		var responseBuilder strings.Builder
+
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+
+			var respData map[string]interface{}
+			if err := json.Unmarshal([]byte(line), &respData); err != nil {
+				continue
+			}
+
+			// Handle the response format for /api/generate
+			if chunk, ok := respData["response"].(string); ok && chunk != "" {
+				responseBuilder.WriteString(chunk)
+			}
+		}
+
+		fullResponse := responseBuilder.String()
+		if fullResponse != "" {
+			sb.WriteString(fullResponse)
+			sb.WriteString("\n")
+		} else {
+			sb.WriteString(response)
+		}
+	}
+
+	return sb.String()
+}
+
 // formatChatMessages formats chat messages in a human-readable way
 func formatChatMessages(request, response string) string {
 	var sb strings.Builder
@@ -358,10 +413,13 @@ func (t *TUI) updateDetailView() {
 	}
 
 	var displayText string
-	if strings.HasSuffix(call.Endpoint, "/api/chat") {
+	switch {
+	case strings.HasSuffix(call.Endpoint, "/api/chat"):
 		displayText = formatChatMessages(call.Request, call.Response)
-	} else {
-		// Fallback to raw display for non-chat endpoints
+	case strings.HasSuffix(call.Endpoint, "/api/generate"):
+		displayText = formatGenerateMessages(call.Request, call.Response)
+	default:
+		// Fallback to raw display for other endpoints
 		var sb strings.Builder
 		sb.WriteString("[yellow]Request:[white]\n")
 		sb.WriteString(call.Request)
