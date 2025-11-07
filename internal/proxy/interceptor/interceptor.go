@@ -8,6 +8,22 @@ import (
 	"ollama-proxy/internal/tracker"
 )
 
+// CallAwareResponse represents a response writer associated with a tracked call.
+type CallAwareResponse interface {
+	http.ResponseWriter
+	CallID() string
+	MarkError()
+	Errored() bool
+}
+
+// AsCallAwareResponse attempts to extract a CallAwareResponse from a response writer.
+func AsCallAwareResponse(w http.ResponseWriter) (CallAwareResponse, bool) {
+	if fw, ok := w.(*responseForwarder); ok {
+		return fw, true
+	}
+	return nil, false
+}
+
 // Interceptor handles request/response interception and tracking
 type Interceptor struct {
 	tracker *tracker.CallTracker

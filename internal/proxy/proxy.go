@@ -47,7 +47,19 @@ func NewProxy(target string, tracker *tracker.CallTracker) (*Proxy, error) {
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if p.interceptor.ShouldIntercept(r) {
 		fw, req, callID := p.interceptor.InterceptRequest(w, r)
+		if fw == nil || req == nil || callID == "" {
+			// Interceptor already handled the response (likely error while reading request body)
+			return
+		}
+
 		p.proxy.ServeHTTP(fw, req)
+
+		if car, ok := interceptor.AsCallAwareResponse(fw); ok {
+			if car.Errored() {
+				return
+			}
+		}
+
 		p.interceptor.CompleteCall(callID)
 		return
 	}
@@ -84,6 +96,11 @@ func (p *Proxy) modifyResponse(resp *http.Response) error {
 // errorHandler handles proxy errors
 func (p *Proxy) errorHandler(w http.ResponseWriter, r *http.Request, err error) {
 	log.Printf("http: proxy error: %v", err)
+
+	if car, ok := interceptor.AsCallAwareResponse(w); ok {
+		car.MarkError()
+	}
+
 	w.WriteHeader(http.StatusBadGateway)
 }
 

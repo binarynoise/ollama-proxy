@@ -2,6 +2,7 @@ package interceptor
 
 import (
 	"net/http"
+	"sync"
 
 	"ollama-proxy/internal/tracker"
 )
@@ -11,6 +12,31 @@ type responseForwarder struct {
 	http.ResponseWriter
 	callID  string
 	tracker *tracker.CallTracker
+
+	mu      sync.Mutex
+	errored bool
+}
+
+func (r *responseForwarder) CallID() string {
+	return r.callID
+}
+
+func (r *responseForwarder) MarkError() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.errored {
+		return
+	}
+	r.errored = true
+	if r.tracker != nil && r.callID != "" {
+		r.tracker.ErrorCall(r.callID)
+	}
+}
+
+func (r *responseForwarder) Errored() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.errored
 }
 
 // Write forwards the response data and updates the tracker
