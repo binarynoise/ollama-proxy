@@ -54,3 +54,63 @@ Flags:
 - `internal/tracker`: in-memory call tracker and event stream
 - `internal/tui`: terminal UI built with `tview`
 - `internal/types`: shared call/event types
+
+## 🐳 Container Usage
+
+### Using Docker
+
+```bash
+# Run with default settings
+# On Linux, add --add-host=host.docker.internal:host-gateway
+docker run -p 11444:11444 ghcr.io/binarynoise/ollama-proxy:latest
+
+# With custom configuration
+docker run \
+  --add-host=host.docker.internal:host-gateway \
+  -p 11445:11444 \
+  -e LISTEN=:11444 \
+  -e TARGET=http://host.docker.internal:11434 \
+  -e MAX_CALLS=100 \
+  ghcr.io/binarynoise/ollama-proxy:latest
+```
+
+### Using Podman
+
+```bash
+# Run with podman
+podman run -p 11444:11444 ghcr.io/binarynoise/ollama-proxy:latest
+
+# With custom configuration
+podman run \
+  -p 11445:11444 \
+  -e LISTEN=:11444 \
+  -e TARGET=http://host.containers.internal:11434 \
+  ghcr.io/binarynoise/ollama-proxy:latest
+```
+
+### Docker Compose Example
+
+```yaml
+version: '3'
+
+services:
+  ollama-proxy:
+    image: ghcr.io/binarynoise/ollama-proxy:latest
+    ports:
+      - "11444:11444"
+    environment:
+      - LISTEN=:11444
+      - TARGET=http://host.docker.internal:11434
+      - MAX_CALLS=100
+    # Linux users may need:
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+```
+
+### Configuration
+
+| Environment Variable | Default | Description |
+|----------------------|---------|-------------|
+| `LISTEN` | `:11444` | Address and port to listen on |
+| `TARGET` | `http://host.docker.internal:11434` | Upstream Ollama server URL |
+| `MAX_CALLS` | `50` | Maximum number of calls to keep in history |
