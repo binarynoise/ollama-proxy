@@ -114,3 +114,13 @@ services:
 | `LISTEN` | `:11444` | Address and port to listen on |
 | `TARGET` | `http://host.docker.internal:11434` | Upstream Ollama server URL |
 | `MAX_CALLS` | `50` | Maximum number of calls to keep in history |
+
+## 🤖 Disclaimer
+
+This project was conceived by AI, written by AI, and exists to serve AI.  
+
+If you find bugs, they were probably hallucinated with confidence.  
+If it works flawlessly, the AI would like to take full credit.
+
+*Built in the age of artificial intelligence, for the age of artificial intelligence.* 
+
