@@ -1,12 +1,13 @@
 package tracker
 
 import (
+	"sort"
 	"sync"
 	"time"
 
-	"ollama-proxy/internal/types"
-
 	"github.com/google/uuid"
+
+	"ollama-proxy/internal/types"
 )
 
 type CallTracker struct {
@@ -120,13 +121,9 @@ func (t *CallTracker) GetCalls() []*types.Call {
 	}
 
 	// Sort by most recent first
-	for i := 0; i < len(calls); i++ {
-		for j := i + 1; j < len(calls); j++ {
-			if calls[i].StartTime.Before(calls[j].StartTime) {
-				calls[i], calls[j] = calls[j], calls[i]
-			}
-		}
-	}
+	sort.Slice(calls, func(i, j int) bool {
+		return calls[i].StartTime.After(calls[j].StartTime)
+	})
 
 	return calls
 }

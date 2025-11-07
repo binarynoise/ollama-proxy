@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
-
-	"ollama-proxy/internal/tracker"
-	"ollama-proxy/internal/types"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+
+	"ollama-proxy/internal/tracker"
+	"ollama-proxy/internal/types"
 )
 
 type TUI struct {
@@ -25,6 +26,8 @@ type TUI struct {
 	tracker    *tracker.CallTracker
 	selectedID string
 	logChan    chan string
+	logMu      sync.RWMutex
+	logClosed  bool
 }
 
 func NewTUI(tracker *tracker.CallTracker) *TUI {
@@ -164,39 +167,26 @@ func (t *TUI) setupUI() {
 }
 
 func (t *TUI) updateCallList() {
-	// Store the current selection
+	currentID := t.selectedID
 	currentIdx := t.callList.GetCurrentItem()
-	var currentID string
-	var isFirstItemSelected bool
-
+	followLatest := currentIdx <= 0
 	if currentIdx >= 0 && currentIdx < t.callList.GetItemCount() {
-		// Get the full ID from the secondary text
-		_, secondaryText := t.callList.GetItemText(currentIdx)
-		assert(secondaryText != "")
-		currentID = secondaryText
-		isFirstItemSelected = (currentIdx == 0)
-		// if secondaryText != "" {
-		// 	currentID = secondaryText
-		// } else if item, _ := t.callList.GetItemText(currentIdx); item != "" {
-		// 	// Fallback: extract from display text if secondary text is not available
-		// 	if strings.HasPrefix(item, "[") {
-		// 		end := strings.Index(item, "]")
-		// 		if end > 0 {
-		// 			currentID = item[1:end]
-		// 		}
-		// 	} else {
-		// 		parts := strings.Fields(item)
-		// 		if len(parts) > 0 {
-		// 			currentID = parts[0]
-		// 		}
-		// 	}
-		// }
+		if _, secondary := t.callList.GetItemText(currentIdx); secondary != "" {
+			currentID = secondary
+		}
 	}
 
 	t.callList.Clear()
-	calls := t.tracker.GetCalls()
 
-	// Add all calls to the list
+	calls := t.tracker.GetCalls()
+	if len(calls) == 0 {
+		t.selectedID = ""
+		t.detailView.Clear()
+		return
+	}
+
+	selectedIdx := 0
+	matchFound := false
 	for i, call := range calls {
 		status := " "
 		switch call.Status {
@@ -208,10 +198,8 @@ func (t *TUI) updateCallList() {
 			status = "❌"
 		}
 
-		var duration time.Duration
-		if call.Status == types.StatusActive {
-			duration = time.Since(call.StartTime).Round(time.Millisecond)
-		} else if call.EndTime != nil {
+		duration := time.Since(call.StartTime).Round(time.Millisecond)
+		if call.Status != types.StatusActive && call.EndTime != nil {
 			duration = call.EndTime.Sub(call.StartTime).Round(time.Millisecond)
 		}
 
@@ -219,62 +207,31 @@ func (t *TUI) updateCallList() {
 		if len(shortID) > 8 {
 			shortID = shortID[:8]
 		}
-		assert(shortID != "")
 
 		itemText := fmt.Sprintf("[%s[] %s %s %s %s", shortID, status, call.Method, call.Endpoint, duration)
-		t.callList.AddItem(
-			itemText,
-			call.ID, // Store full ID as secondary text for reference
-			0,
-			nil,
-		)
+		t.callList.AddItem(itemText, call.ID, 0, nil)
 
-		// If this was the previously selected item, select it again
-		if currentID != "" && strings.HasPrefix(call.ID, currentID) {
-			t.callList.SetCurrentItem(i)
-			t.selectedID = call.ID
+		if !matchFound && currentID != "" && call.ID == currentID {
+			selectedIdx = i
+			matchFound = true
 		}
 	}
 
-	// Handle selection logic
-	if t.callList.GetItemCount() > 0 {
-		// If we had a selection but it's no longer valid, or if the first item was selected before
-		if currentID == "" || t.callList.GetCurrentItem() < 0 || isFirstItemSelected {
-			// Select the first (newest) item
-			t.callList.SetCurrentItem(0)
-			if len(calls) > 0 {
-				t.selectedID = calls[0].ID
-				t.updateDetailView()
-			}
-		} else {
-			// Try to maintain the same selection if it still exists
-			found := false
-			for i, call := range calls {
-				if call.ID == currentID {
-					t.callList.SetCurrentItem(i)
-					t.selectedID = call.ID
-					t.updateDetailView()
-					found = true
-					break
-				}
-			}
-			// If the previously selected call is gone, select the first one
-			if !found && len(calls) > 0 {
-				t.callList.SetCurrentItem(0)
-				t.selectedID = calls[0].ID
-				t.updateDetailView()
-			}
-		}
+	if followLatest || !matchFound {
+		selectedIdx = 0
 	}
+
+	t.callList.SetCurrentItem(selectedIdx)
+
+	if _, secondary := t.callList.GetItemText(selectedIdx); secondary != "" {
+		t.selectedID = secondary
+	} else {
+		t.selectedID = calls[selectedIdx].ID
+	}
+
+	t.updateDetailView()
 }
 
-func assert(b bool) {
-	if !b {
-		panic("assertion failed")
-	}
-}
-
-// formatGenerateMessages formats /api/generate responses in a human-readable way
 func formatGenerateMessages(request, response string) string {
 	var sb strings.Builder
 
@@ -329,7 +286,6 @@ func formatGenerateMessages(request, response string) string {
 	return sb.String()
 }
 
-// formatChatMessages formats chat messages in a human-readable way
 func formatChatMessages(request, response string) string {
 	var sb strings.Builder
 
@@ -432,7 +388,40 @@ func (t *TUI) updateDetailView() {
 	t.detailView.ScrollToEnd()
 }
 
-// logProcessor handles log messages in a separate goroutine
+type logWriter struct {
+	tui *TUI
+}
+
+func (lw *logWriter) Write(p []byte) (n int, err error) {
+	return lw.tui.enqueueLog(string(p)), nil
+}
+
+func (t *TUI) Write(p []byte) (n int, err error) {
+	return t.enqueueLog(string(p)), nil
+}
+
+func (t *TUI) enqueueLog(msg string) int {
+	t.logMu.RLock()
+	defer t.logMu.RUnlock()
+	if t.logClosed {
+		return len(msg)
+	}
+
+	t.logChan <- msg
+	return len(msg)
+}
+
+func (t *TUI) closeLog() {
+	t.logMu.Lock()
+	defer t.logMu.Unlock()
+	if t.logClosed {
+		return
+	}
+
+	t.logClosed = true
+	close(t.logChan)
+}
+
 func (t *TUI) startLogProcessor() {
 	for msg := range t.logChan {
 		t.app.QueueUpdateDraw(func() {
@@ -440,23 +429,6 @@ func (t *TUI) startLogProcessor() {
 			t.logView.ScrollToEnd()
 		})
 	}
-}
-
-// Write implements io.Writer for logging
-type logWriter struct {
-	tui *TUI
-}
-
-func (lw *logWriter) Write(p []byte) (n int, err error) {
-	// Send log message to the channel instead of updating UI directly
-	lw.tui.logChan <- string(p)
-	return len(p), nil
-}
-
-// Write implements io.Writer interface for TUI
-func (t *TUI) Write(p []byte) (n int, err error) {
-	t.logChan <- string(p)
-	return len(p), nil
 }
 
 func (t *TUI) Run() error {
@@ -471,9 +443,7 @@ func (t *TUI) Run() error {
 
 	// Start a goroutine to update the UI
 	go func() {
-		defer func() {
-			close(t.logChan)
-		}()
+		defer t.closeLog()
 		for event := range t.tracker.Events() {
 			t.app.QueueUpdateDraw(func() {
 				// Update the call list to show the latest calls
@@ -483,18 +453,6 @@ func (t *TUI) Run() error {
 				// If this event is for the currently selected call, update the detail view
 				if event.ID == prevSelected || prevSelected == "" {
 					t.updateDetailView()
-				}
-
-				// If we just added a new call and no call is selected, select the first one
-				if t.selectedID == "" && t.callList.GetItemCount() > 0 {
-					t.callList.SetCurrentItem(0)
-					if item, _ := t.callList.GetItemText(0); item != "" {
-						parts := strings.Fields(item)
-						if len(parts) > 0 {
-							t.selectedID = strings.Trim(parts[0], "[]")
-							t.updateDetailView()
-						}
-					}
 				}
 			})
 		}
