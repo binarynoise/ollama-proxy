@@ -103,7 +103,7 @@ func (t *TUI) setupUI() {
 
 	// Configure status view
 	t.statusView.SetBorder(false)
-	t.statusView.SetText("↑/↓: Navigate | Enter: Select | Tab: Next | Esc: Back to calls | q: Quit")
+	t.statusView.SetText("↑/↓: Navigate | Enter: Select | Tab/Shift+Tab: Switch Panel | Esc: Back to Calls | q: Quit")
 
 	// Create the layout
 	// Top panel contains call list and detail view side by side
@@ -124,39 +124,32 @@ func (t *TUI) setupUI() {
 	// Set input capture for global shortcuts
 	t.flex.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
-		case tcell.KeyTab:
+		case tcell.KeyBacktab:
 			// Cycle focus between call list, detail view, and log view
 			switch t.app.GetFocus() {
 			case t.callList:
 				t.app.SetFocus(t.detailView)
-				t.statusView.SetText("Tab: Next | Esc: Back to calls | q: Quit")
 			case t.detailView:
 				t.app.SetFocus(t.logView)
-				t.statusView.SetText("↑/↓: Scroll | Tab/Shift+Tab: Navigate | Esc: Back to calls | q: Quit")
 			case t.logView:
 				t.app.SetFocus(t.callList)
-				t.statusView.SetText("↑/↓: Navigate | Enter: Select | Tab: Next | q: Quit")
 			}
 			return nil
-		case tcell.KeyBacktab: // Shift+Tab
+		case tcell.KeyTab: // Shift+Tab
 			// Cycle focus in reverse order
 			switch t.app.GetFocus() {
 			case t.callList:
 				t.app.SetFocus(t.logView)
-				t.statusView.SetText("↑/↓: Scroll | Tab/Shift+Tab: Navigate | Esc: Back to calls | q: Quit")
 			case t.detailView:
 				t.app.SetFocus(t.callList)
-				t.statusView.SetText("↑/↓: Navigate | Enter: Select | Tab: Next | q: Quit")
 			case t.logView:
 				t.app.SetFocus(t.detailView)
-				t.statusView.SetText("Tab: Next | Esc: Back to calls | q: Quit")
 			}
 			return nil
 		case tcell.KeyEscape:
 			// Always allow escape to return to call list
 			if t.app.GetFocus() != t.callList {
 				t.app.SetFocus(t.callList)
-				t.statusView.SetText("↑/↓: Navigate | Enter: Select | q: Quit")
 				return nil
 			}
 		case tcell.KeyRune:
@@ -174,11 +167,14 @@ func (t *TUI) updateCallList() {
 	// Store the current selection
 	currentIdx := t.callList.GetCurrentItem()
 	var currentID string
+	var isFirstItemSelected bool
+
 	if currentIdx >= 0 && currentIdx < t.callList.GetItemCount() {
-		// Get the full ID from the secondary text if available
+		// Get the full ID from the secondary text
 		_, secondaryText := t.callList.GetItemText(currentIdx)
 		assert(secondaryText != "")
 		currentID = secondaryText
+		isFirstItemSelected = (currentIdx == 0)
 		// if secondaryText != "" {
 		// 	currentID = secondaryText
 		// } else if item, _ := t.callList.GetItemText(currentIdx); item != "" {
@@ -240,12 +236,34 @@ func (t *TUI) updateCallList() {
 		}
 	}
 
-	// If we had a selection but it's no longer valid, select the first item
-	if t.callList.GetItemCount() > 0 && (currentID == "" || t.callList.GetCurrentItem() < 0) {
-		t.callList.SetCurrentItem(0)
-		if len(calls) > 0 {
-			t.selectedID = calls[0].ID
-			t.updateDetailView()
+	// Handle selection logic
+	if t.callList.GetItemCount() > 0 {
+		// If we had a selection but it's no longer valid, or if the first item was selected before
+		if currentID == "" || t.callList.GetCurrentItem() < 0 || isFirstItemSelected {
+			// Select the first (newest) item
+			t.callList.SetCurrentItem(0)
+			if len(calls) > 0 {
+				t.selectedID = calls[0].ID
+				t.updateDetailView()
+			}
+		} else {
+			// Try to maintain the same selection if it still exists
+			found := false
+			for i, call := range calls {
+				if call.ID == currentID {
+					t.callList.SetCurrentItem(i)
+					t.selectedID = call.ID
+					t.updateDetailView()
+					found = true
+					break
+				}
+			}
+			// If the previously selected call is gone, select the first one
+			if !found && len(calls) > 0 {
+				t.callList.SetCurrentItem(0)
+				t.selectedID = calls[0].ID
+				t.updateDetailView()
+			}
 		}
 	}
 }
