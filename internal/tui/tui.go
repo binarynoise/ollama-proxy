@@ -111,8 +111,9 @@ func (t *TUI) setupUI() {
 	// Create the layout
 	// Top panel contains call list and detail view side by side
 	topPanel := tview.NewFlex()
-	topPanel.AddItem(t.callList, 0, 1, true)
-	topPanel.AddItem(t.detailView, 0, 2, false)
+	// Set fixed width of 30 columns for the call list, then let detail view take remaining space
+	topPanel.AddItem(t.callList, 40, 0, true)
+	topPanel.AddItem(t.detailView, 0, 1, false)
 
 	// Main layout: top panel on top, log view at bottom
 	t.flex = tview.NewFlex().
