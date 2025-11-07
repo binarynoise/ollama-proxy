@@ -66,65 +66,61 @@ func (t *CallTracker) NewCall(method, endpoint, request string) *types.Call {
 	return call
 }
 
-func (t *CallTracker) UpdateCall(id, data string) {
+// withCall executes the provided function with the call if it exists
+func (t *CallTracker) withCall(id string, fn func(*types.Call)) bool {
 	t.mu.RLock()
 	call, exists := t.calls[id]
 	t.mu.RUnlock()
 
-	if exists {
+	if exists && call != nil {
+		fn(call)
+		return true
+	}
+	return false
+}
+
+func (t *CallTracker) UpdateCall(id, data string) {
+	t.withCall(id, func(call *types.Call) {
 		call.UpdateResponse(data)
 		t.eventChan <- types.Event{
 			ID:   id,
 			Data: data,
 			Done: false,
 		}
-	}
+	})
 }
 
 func (t *CallTracker) CompleteCall(id string) {
-	t.mu.RLock()
-	call, exists := t.calls[id]
-	t.mu.RUnlock()
-
-	if exists {
+	t.withCall(id, func(call *types.Call) {
 		call.MarkDone()
 		t.eventChan <- types.Event{
 			ID:   id,
 			Data: "",
 			Done: true,
 		}
-	}
+	})
 }
 
 func (t *CallTracker) ErrorCall(id string) {
-	t.mu.RLock()
-	call, exists := t.calls[id]
-	t.mu.RUnlock()
-
-	if exists {
+	t.withCall(id, func(call *types.Call) {
 		call.MarkError()
 		t.eventChan <- types.Event{
 			ID:   id,
 			Data: "Error occurred",
 			Done: true,
 		}
-	}
+	})
 }
 
-// DisconnectCall marks a call as disconnected by the client
 func (t *CallTracker) DisconnectCall(id string) {
-	t.mu.RLock()
-	call, exists := t.calls[id]
-	t.mu.RUnlock()
-
-	if exists {
+	t.withCall(id, func(call *types.Call) {
 		call.MarkDisconnected()
 		t.eventChan <- types.Event{
 			ID:   id,
 			Data: "Client disconnected",
 			Done: true,
 		}
-	}
+	})
 }
 
 func (t *CallTracker) GetCalls() []*types.Call {

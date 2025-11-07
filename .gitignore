@@ -4,7 +4,8 @@
 *.dll
 *.so
 *.dylib
-ollama-proxy-tui
+/ollama-proxy-tui
+/dist/
 
 # Test binary, built with `go test -c`
 *.test

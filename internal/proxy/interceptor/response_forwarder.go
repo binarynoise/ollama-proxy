@@ -27,13 +27,19 @@ func (r *responseForwarder) CallID() string {
 	return r.callID
 }
 
+// MarkError marks the response as errored and notifies the tracker
 func (r *responseForwarder) MarkError() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	
+	// If already errored, nothing to do
 	if r.errored {
 		return
 	}
+	
 	r.errored = true
+	
+	// Notify tracker if available
 	if r.tracker != nil && r.callID != "" {
 		r.tracker.ErrorCall(r.callID)
 	}
@@ -47,65 +53,60 @@ func (r *responseForwarder) Errored() bool {
 
 // WriteHeader captures the status code and marks errors for 4xx/5xx responses
 func (r *responseForwarder) WriteHeader(statusCode int) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	
 	if statusCode >= 400 {
-		r.errored = true
-		if r.tracker != nil && r.callID != "" {
-			r.tracker.ErrorCall(r.callID)
-		}
+		r.MarkError()
 	}
 	r.ResponseWriter.WriteHeader(statusCode)
 }
 
-// setupContext sets up context cancellation when the client disconnects
+// setupContext sets up context cancellation when the client disconnects.
+// It ensures proper cleanup of resources and handles client disconnections.
 func (r *responseForwarder) setupContext(ctx context.Context) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	// If already set up, do nothing
 	if r.done != nil {
-		r.mu.Unlock()
 		return
 	}
 
 	r.done = make(chan struct{})
-
-	// Create a cancellable context for the request
 	reqCtx, cancelReqCtx := context.WithCancel(ctx)
 	r.ctx, r.cancel = context.WithCancel(context.Background())
-	r.mu.Unlock()
 
 	// Start a goroutine to handle context cancellation
 	go func() {
-		// Wait for either the request context to be done or the request to complete
+		defer cancelReqCtx()
+
 		select {
 		case <-reqCtx.Done():
-			r.mu.Lock()
-			defer r.mu.Unlock()
-
-			// If we've already completed or errored, don't mark as disconnected
-			if r.errored || r.tracker == nil || r.callID == "" {
-				return
-			}
-
-			// Check if the request context was canceled due to client disconnect
-			if reqCtx.Err() == context.Canceled && ctx.Err() == context.Canceled {
-				// This is a client disconnection
-				select {
-				case <-r.done:
-					// Request completed normally just as we were checking
-				default:
-					r.tracker.DisconnectCall(r.callID)
-					r.errored = true
-				}
-			}
-
+			r.handleClientDisconnect(reqCtx, ctx)
 		case <-r.done:
-			// Request completed normally, clean up the request context
-			cancelReqCtx()
+			// Request completed normally
 		}
 	}()
+}
+
+// handleClientDisconnect handles the case when the client disconnects
+func (r *responseForwarder) handleClientDisconnect(reqCtx, parentCtx context.Context) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// If we've already completed or errored, or missing required references
+	if r.errored || r.tracker == nil || r.callID == "" {
+		return
+	}
+
+	// Check if this was a client disconnection
+	if reqCtx.Err() == context.Canceled && parentCtx.Err() == context.Canceled {
+		select {
+		case <-r.done:
+			// Request completed normally
+		default:
+			r.tracker.DisconnectCall(r.callID)
+			r.errored = true
+		}
+	}
 }
 
 // Close cleans up resources

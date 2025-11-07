@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strings"
+	"path"
 
 	"ollama-proxy/internal/proxy/interceptor"
 	"ollama-proxy/internal/tracker"
@@ -54,10 +54,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		p.proxy.ServeHTTP(fw, req)
 
-		if car, ok := interceptor.AsCallAwareResponse(fw); ok {
-			if car.Errored() {
-				return
-			}
+		if car, ok := interceptor.AsCallAwareResponse(fw); ok && car.Errored() {
+			return
 		}
 
 		p.interceptor.CompleteCall(fw, callID)
@@ -73,7 +71,7 @@ func (p *Proxy) director(req *http.Request) {
 	targetQuery := p.target.RawQuery
 	req.URL.Scheme = p.target.Scheme
 	req.URL.Host = p.target.Host
-	req.URL.Path = singleJoiningSlash(p.target.Path, req.URL.Path)
+	req.URL.Path = path.Join(p.target.Path, req.URL.Path)
 
 	switch {
 	case targetQuery == "" || req.URL.RawQuery == "":
@@ -102,17 +100,4 @@ func (p *Proxy) errorHandler(w http.ResponseWriter, r *http.Request, err error) 
 	}
 
 	w.WriteHeader(http.StatusBadGateway)
-}
-
-// singleJoiningSlash joins two URL paths with a single slash
-func singleJoiningSlash(a, b string) string {
-	aslash := strings.HasSuffix(a, "/")
-	bslash := strings.HasPrefix(b, "/")
-	switch {
-	case aslash && bslash:
-		return a + b[1:]
-	case !aslash && !bslash:
-		return a + "/" + b
-	}
-	return a + b
 }
