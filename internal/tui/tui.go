@@ -8,6 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
@@ -30,8 +33,20 @@ type TUI struct {
 	logClosed  bool
 }
 
+const (
+	modelColor     = "blue"
+	promptColor    = "olive"
+	responseColor  = "olive"
+	assistantColor = "-"
+	textColor      = "-"
+	roleColor      = "red"
+)
+
 func NewTUI(tracker *tracker.CallTracker) *TUI {
 	app := tview.NewApplication()
+
+	// Use default terminal colors
+	tview.Styles = tview.Theme{}
 
 	logView := tview.NewTextView().
 		SetDynamicColors(true).
@@ -41,7 +56,7 @@ func NewTUI(tracker *tracker.CallTracker) *TUI {
 
 	t := &TUI{
 		app:        app,
-		callList:   tview.NewList().ShowSecondaryText(false),
+		callList:   tview.NewList().ShowSecondaryText(false).SetSelectedStyle(tcell.Style{}.Reverse(true)),
 		detailView: tview.NewTextView().SetDynamicColors(true),
 		logView:    logView,
 		statusView: tview.NewTextView().SetTextAlign(tview.AlignCenter),
@@ -87,11 +102,8 @@ func (t *TUI) setupUI() {
 	t.logView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		// Allow scrolling in log view
 		switch event.Key() {
-		case tcell.KeyUp, tcell.KeyDown, tcell.KeyPgUp, tcell.KeyPgDn, tcell.KeyHome, tcell.KeyEnd:
-			return event
 		case tcell.KeyEscape:
 			t.app.SetFocus(t.callList)
-			t.statusView.SetText("↑/↓: Navigate | Enter: Select | q: Quit")
 			return nil
 		}
 		return event
@@ -124,11 +136,12 @@ func (t *TUI) setupUI() {
 
 	// Setup logger with our custom writer that updates the UI
 	log.SetOutput(&logWriter{tui: t})
+	log.Printf("Colors: [%s]modelColor, [%s]promptColor, [%s]responseColor, [%s]assistantColor, [%s]headerColor [-]", modelColor, promptColor, responseColor, assistantColor, roleColor)
 
 	// Set input capture for global shortcuts
 	t.flex.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
-		case tcell.KeyBacktab:
+		case tcell.KeyTab:
 			// Cycle focus between call list, detail view, and log view
 			switch t.app.GetFocus() {
 			case t.callList:
@@ -139,7 +152,7 @@ func (t *TUI) setupUI() {
 				t.app.SetFocus(t.callList)
 			}
 			return nil
-		case tcell.KeyTab: // Shift+Tab
+		case tcell.KeyBacktab: // Shift+Tab
 			// Cycle focus in reverse order
 			switch t.app.GetFocus() {
 			case t.callList:
@@ -244,11 +257,11 @@ func formatGenerateMessages(request, response string) string {
 		if err := json.Unmarshal([]byte(request), &reqData); err == nil {
 			// Display model if available
 			if model, ok := reqData["model"].(string); ok && model != "" {
-				sb.WriteString(fmt.Sprintf("[blue]Model:[white] %s\n\n", model))
+				sb.WriteString(fmt.Sprintf("[%s]Model:[%s] %s\n\n", modelColor, textColor, model))
 			}
 
 			// Display prompt
-			sb.WriteString("[yellow]Prompt:[white]\n")
+			sb.WriteString(fmt.Sprintf("[%s]Prompt:[%s]\n", promptColor, textColor))
 			if prompt, ok := reqData["prompt"].(string); ok && prompt != "" {
 				sb.WriteString(prompt)
 				sb.WriteString("\n")
@@ -256,16 +269,16 @@ func formatGenerateMessages(request, response string) string {
 				sb.WriteString(request)
 			}
 		} else {
-			sb.WriteString("[yellow]Prompt:[white]\n")
+			sb.WriteString(fmt.Sprintf("[%s]Prompt:[%s]\n", promptColor, textColor))
 			sb.WriteString(request)
 		}
 	} else {
-		sb.WriteString("[yellow]Prompt:[white]\n")
+		sb.WriteString(fmt.Sprintf("[%s]Prompt:[%s]\n", promptColor, textColor))
 		sb.WriteString(request)
 	}
 
 	// Parse and display the response
-	sb.WriteString("\n\n[yellow]Response:[white]\n")
+	sb.WriteString(fmt.Sprintf("\n\n[%s]Response:[%s]\n", responseColor, textColor))
 	if strings.TrimSpace(response) != "" {
 		// Handle both single response and streamed responses (one JSON object per line)
 		lines := strings.Split(strings.TrimSpace(response), "\n")
@@ -308,18 +321,18 @@ func formatChatMessages(request, response string) string {
 		if err := json.Unmarshal([]byte(request), &reqData); err == nil {
 			// Display model if available
 			if model, ok := reqData["model"].(string); ok && model != "" {
-				sb.WriteString(fmt.Sprintf("[blue]Model:[white] %s\n\n", model))
+				sb.WriteString(fmt.Sprintf("[%s]Model:[%s] %s\n\n", modelColor, textColor, model))
 			}
 
 			// Display messages
-			sb.WriteString("[yellow]Request:[white]\n")
+			sb.WriteString(fmt.Sprintf("[%s]Request:[%s]\n", promptColor, textColor))
 			if messages, ok := reqData["messages"].([]interface{}); ok {
 				for _, msg := range messages {
 					if msgMap, ok := msg.(map[string]interface{}); ok {
 						role, _ := msgMap["role"].(string)
 						content, _ := msgMap["content"].(string)
 						if role != "" && content != "" {
-							sb.WriteString(fmt.Sprintf("\n# %s\n%s\n", strings.Title(role), content))
+							sb.WriteString(fmt.Sprintf("\n[%s]# %s[%s]\n%s\n", roleColor, cases.Title(language.English).String(role), textColor, content))
 						}
 					}
 				}
@@ -332,7 +345,7 @@ func formatChatMessages(request, response string) string {
 	}
 
 	// Add response
-	sb.WriteString("\n\n[yellow]Response:[white]\n")
+	sb.WriteString(fmt.Sprintf("\n\n[%s]Response:[%s]\n", responseColor, textColor))
 	if strings.TrimSpace(response) != "" {
 		// Handle both single response and streamed responses (one JSON object per line)
 		lines := strings.Split(strings.TrimSpace(response), "\n")
@@ -366,7 +379,7 @@ func formatChatMessages(request, response string) string {
 		}
 
 		if lastResponse != "" {
-			sb.WriteString(fmt.Sprintf("# Assistant\n%s\n", lastResponse))
+			sb.WriteString(fmt.Sprintf("\n[%s]# Assistant[%s]\n%s\n", assistantColor, textColor, lastResponse))
 		} else {
 			sb.WriteString(response)
 		}
@@ -396,9 +409,9 @@ func (t *TUI) updateDetailView() {
 	default:
 		// Fallback to raw display for other endpoints
 		var sb strings.Builder
-		sb.WriteString("[yellow]Request:[white]\n")
+		sb.WriteString(fmt.Sprintf("[%s]Request:[%s]\n", promptColor, textColor))
 		sb.WriteString(call.Request)
-		sb.WriteString("\n\n[yellow]Response:[white]\n")
+		sb.WriteString(fmt.Sprintf("\n\n[%s]Response:[%s]\n", responseColor, textColor))
 		sb.WriteString(call.Response)
 		displayText = sb.String()
 	}
