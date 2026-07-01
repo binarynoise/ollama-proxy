@@ -1,11 +1,13 @@
 # Ollama Proxy - High-Level Design Document
 
 ## Purpose
+
 A reverse proxy with a live terminal UI that intercepts and displays AI API calls (Ollama, OpenAI, Claude) for observability and debugging.
 
 ---
 
 ## Core Concept
+
 The system acts as a transparent intermediary between AI clients and an upstream AI API server. It captures request/response payloads for specific endpoints and presents them in a real-time interactive console view.
 
 ---
@@ -42,6 +44,7 @@ The system acts as a transparent intermediary between AI clients and an upstream
 **Responsibility:** Forward HTTP requests to an upstream server while optionally intercepting specific endpoints.
 
 **Behavior:**
+
 - Accepts HTTP requests on a configurable listen address
 - Modifies incoming requests to target the upstream server (URL rewriting)
 - Routes all traffic to the upstream API server and back
@@ -49,6 +52,7 @@ The system acts as a transparent intermediary between AI clients and an upstream
 - Forwards errors and cleanly shuts the affected connections
 
 **Configuration:**
+
 - Listen address (host:port)
 - Target upstream URL
 
@@ -60,6 +64,7 @@ The system acts as a transparent intermediary between AI clients and an upstream
 
 **Endpoint Filtering:**
 Intercept ONLY these endpoints (path suffix matching):
+
 - `/api/chat` (Ollama chat)
 - `/api/generate` (Ollama generate)
 - `/v1/chat/completions` (OpenAI chat)
@@ -69,17 +74,20 @@ Intercept ONLY these endpoints (path suffix matching):
 All other requests pass through unmodified (and are only logged, not captured).
 
 **Request Capture:**
+
 - Read the complete request body
 - Create a record in the Call Store
 
 **Response Capture:**
 The response writer wrapper must:
+
 - Buffer streaming data
 - Handle chunked responses (SSE or jsonl)
-- Parse the format: lines can contain complete JSON objects (jsonl) or be prefixed with `data: ` containing JSON payloads (SSE)
+- Parse the format: lines can contain complete JSON objects (jsonl) or be prefixed with `data:` containing JSON payloads (SSE)
 - Extract complete JSON objects from potentially fragmented chunks
 
 **Error Handling:**
+
 - Mark calls as errored on HTTP 4xx/5xx responses or upstream connection errors
 - Mark calls as disconnected when client closes connection
 
@@ -90,6 +98,7 @@ The response writer wrapper must:
 **Responsibility:** Maintain a bounded, in-memory history of API calls with event streaming.
 
 **Data Model - Call:**
+
 - Unique identifier (UUID)
 - HTTP method (GET, POST, etc.)
 - Endpoint path
@@ -100,6 +109,7 @@ The response writer wrapper must:
 - Response body (string, append as data arrives)
 
 **Behavior:**
+
 - Creates new Call records on intercepted requests
 - Supports concurrent updates to response content (thread-safe)
 - Enforces maximum capacity by removing the oldest calls
@@ -107,6 +117,7 @@ The response writer wrapper must:
 
 **Event Model:**
 Events notify subscribers of changes:
+
 - Published on: new call, response update, call completion, call error, call disconnected
 
 ---
@@ -116,6 +127,7 @@ Events notify subscribers of changes:
 **Responsibility:** Display captured calls and their details in an interactive console interface.
 
 **Layout:**
+
 - Left panel: Scrollable list of recent calls
   - Columns: Short ID, Status Icon, Method, Endpoint, Duration
   - Status icons: Active (🟢), Done (✅), Error (❌), Disconnected (🟠)
@@ -126,6 +138,7 @@ Events notify subscribers of changes:
 - Bottom panel: Log output from the application
 
 **Interaction:**
+
 - Navigation: Up/Down arrows move through call list
 - Selection: Enter or automatic selection on navigation
 - Focus: Tab/Shift-Tab cycles between panels
@@ -134,21 +147,27 @@ Events notify subscribers of changes:
 **Formatting by Endpoint Type:**
 
 *Ollama /api/generate:*
+
 - Display: Model name, Prompt, Response (concatenated from streaming chunks)
 
 *Ollama /api/chat:*
+
 - Display: Model name, Messages (role + content per message), Response
 
 *OpenAI /v1/chat/completions:*
+
 - Display: Model name, Messages, Response
 
 *OpenAI /v1/completions:*
+
 - Display: Model name, Prompt, Response
 
 *Claude /v1/messages:*
+
 - Display: Model name, Messages, Response
 
 **Color Coding:**
+
 - Model names: Highlighted
 - Roles (User/Assistant/System): Highlighted
 - Prompt/Request: Highlighted
@@ -156,6 +175,7 @@ Events notify subscribers of changes:
 - Reasoning/Thinking: Dimmed/subdued
 
 **Real-time Updates:**
+
 - Refresh call list on new/updated calls
 - Update detail view when selected call is updated or new data arrives
 - Auto-scroll to latest content in response panel
@@ -176,6 +196,7 @@ Events notify subscribers of changes:
 8. Call Store extracts relevant fields and updates the Call record
 
 ### UI Update Flow
+
 1. UI subscribes to Call Store Events channel
 2. On each event: Refresh call list display
 3. If event is for selected call: Refresh detail view
@@ -196,15 +217,18 @@ Events notify subscribers of changes:
 ## Error Handling - Special Cases
 
 **Proxy Connection Errors:**
+
 - Log error, mark associated call as errored
 - Return HTTP 502 Bad Gateway to client
 
 **Client Disconnection:**
+
 - Detect early termination of the client connection
 - Mark call as DISCONNECTED
 - Close upstream connection to stop processing response
 
 **Unknown JSON content:**
+
 - Log warning, dump raw content into response pane for debugging
 
 ---
@@ -212,6 +236,7 @@ Events notify subscribers of changes:
 ## Shutdown Behavior
 
 On shutdown signal (SIGINT/SIGTERM or internal shutdown request):
+
 1. Cancel context to stop accepting new connections
 2. Allow in-flight requests to complete (with timeout)
 3. Close UI event processing
@@ -221,11 +246,11 @@ On shutdown signal (SIGINT/SIGTERM or internal shutdown request):
 
 ## Configuration Parameters
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| Listen Address | `:11444` | Host:port to listen on |
-| Target URL | `http://localhost:11434` | Upstream API server |
-| Max Calls | `50` | Maximum calls to keep in history |
+| Parameter      | Default                  | Description                      |
+| -------------- | ------------------------ | -------------------------------- |
+| Listen Address | `:11444`                 | Host:port to listen on           |
+| Target URL     | `http://localhost:11434` | Upstream API server              |
+| Max Calls      | `50`                     | Maximum calls to keep in history |
 
 ---
 
@@ -242,6 +267,7 @@ On shutdown signal (SIGINT/SIGTERM or internal shutdown request):
 ## Testing Considerations
 
 The system should handle:
+
 - Concurrent requests
 - Large request/response bodies
 - Streaming responses with varying chunk sizes (including edge cases like empty chunks, JSON split across chunks)
