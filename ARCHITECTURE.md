@@ -8,7 +8,7 @@ A reverse proxy with a live terminal UI that intercepts and displays AI API call
 
 ## Core Concept
 
-The system acts as a transparent intermediary between AI clients and an upstream AI API server. It captures request/response payloads for specific endpoints and presents them in a real-time interactive console view.
+The system acts as a transparent intermediary between AI clients and an upstream AI API server. A reverse proxy relays traffic while feeding a copy to an Parser component, which captures request/response payloads for specific endpoints and presents them in a real-time interactive console view.
 
 ---
 
@@ -17,11 +17,17 @@ The system acts as a transparent intermediary between AI clients and an upstream
 ```
 ┌─────────────┐      ┌─────────────────┐      ┌─────────────────┐
 │   Client    │◄────►│  Reverse Proxy  │◄────►│  Upstream API   │
-│  (any AI    │      │  (with          │      │  (Ollama/etc)   │
-│   client)   │      │   Interceptor)  │      │                 │
-└─────────────┘      └────────┬────────┘      └─────────────────┘
-                              │
+│  (any AI    │      │  (relay only)   │      │  (Ollama/etc)   │
+│   client)   │      └────────┬────────┘      └─────────────────┘
+└─────────────┘               │(copy)
                               ▼
+                    ┌─────────────────┐
+                    │   Interceptor   │
+                    │  (capture &     │
+                    │   parse)        │
+                    └────────┬────────┘
+                             │
+                             ▼
                     ┌─────────────────┐
                     │   Call Store    │
                     │  (In-Memory     │
@@ -41,15 +47,16 @@ The system acts as a transparent intermediary between AI clients and an upstream
 
 ### 1. Reverse Proxy
 
-**Responsibility:** Forward HTTP requests to an upstream server while optionally intercepting specific endpoints.
+**Responsibility:** Relay HTTP traffic between client and upstream API server. Provide the Interceptor with a copy of request/response data without processing it.
 
 **Behavior:**
 
 - Accepts HTTP requests on a configurable listen address
 - Modifies incoming requests to target the upstream server (URL rewriting)
 - Routes all traffic to the upstream API server and back
-- Delegates to an Interceptor for capture-worthy requests
 - Forwards errors and cleanly shuts the affected connections
+- Feeds a copy of each request and response to the Interceptor
+- Has no knowledge of endpoints, payload formats, or call lifecycle
 
 **Configuration:**
 
@@ -60,7 +67,7 @@ The system acts as a transparent intermediary between AI clients and an upstream
 
 ### 2. Interceptor
 
-**Responsibility:** Decide which requests to capture and extract full request/response payloads.
+**Responsibility:** Receive copies of request/response data from the Reverse Proxy, decide which calls are worth capturing, parse payloads, and feed records to the Call Store.
 
 **Endpoint Filtering:**
 Intercept ONLY these endpoints (path suffix matching):
@@ -71,17 +78,17 @@ Intercept ONLY these endpoints (path suffix matching):
 - `/v1/completions` (OpenAI completions)
 - `/v1/messages` (Claude messages)
 
-All other requests pass through unmodified (and are only logged, not captured).
+All other requests are dropped (the Interceptor does not create Call records for them).
 
 **Request Capture:**
 
-- Read the complete request body
+- Receive a copy of the request body from the Proxy
 - Create a record in the Call Store
 
 **Response Capture:**
-The response writer wrapper must:
+The response reader must:
 
-- Buffer streaming data
+- Buffer streaming data received as a copy from the Proxy
 - Handle chunked responses (SSE or jsonl)
 - Parse the format: lines can contain complete JSON objects (jsonl) or be prefixed with `data:` containing JSON payloads (SSE)
 - Extract complete JSON objects from potentially fragmented chunks
@@ -188,11 +195,11 @@ Events notify subscribers of changes:
 
 1. Client sends HTTP request to Proxy
 2. Proxy sets up communication between client and upstream
-3. Proxy sends a copy of the request to the Call Store
-4. Call Store creates a new Call record with the request data
-5. Proxy sends a streamed copy of the (streamed) response to the Call Buffer as it is received
-6. Call Buffer buffers the response chunks until valid JSON is ready to be parsed
-7. Call Buffer sends the parsed JSON to the Call Store
+3. Proxy sends a copy of the request to the Interceptor
+4. Interceptor evaluates the endpoint; if it matches the filter list, it creates a new Call record in the Call Store
+5. Proxy sends a streamed copy of the (streamed) response to the Interceptor as it is received
+6. Interceptor buffers the response chunks until valid JSON is ready to be parsed
+7. Interceptor sends the parsed JSON to the Call Store
 8. Call Store extracts relevant fields and updates the Call record
 
 ### UI Update Flow
@@ -218,14 +225,14 @@ Events notify subscribers of changes:
 
 **Proxy Connection Errors:**
 
-- Log error, mark associated call as errored
-- Return HTTP 502 Bad Gateway to client
+- Proxy returns HTTP 502 Bad Gateway to client
+- Proxy notifies Interceptor, which marks the associated call as errored
 
 **Client Disconnection:**
 
-- Detect early termination of the client connection
-- Mark call as DISCONNECTED
-- Close upstream connection to stop processing response
+- Proxy detects early termination of the client connection
+- Proxy closes upstream connection to stop processing the response
+- Proxy notifies Interceptor, which marks the call as DISCONNECTED
 
 **Unknown JSON content:**
 
